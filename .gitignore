@@ -1,0 +1,6 @@
+*.mp4
+*.avi
+*.7z
+*.zip
+*.pth
+__pycache__/
