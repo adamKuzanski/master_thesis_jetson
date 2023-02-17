@@ -1,6 +1,7 @@
 import pafy
 import cv2
 from ultrafastLaneDetector import UltrafastLaneDetector, ModelType
+#for data collection only
 
 def loadVideoToStreanm(videoUrl):
     print("Trying to load video from: {}".format(videoUrl))
@@ -20,10 +21,12 @@ def initLaneDetector(modelPath, isTuSimple, useGpu):
     print("Setting model with params: \t modelPath: {} , modelType: {} , gpu: {}".format(modelPath, modelType, useGpu))
     return UltrafastLaneDetector(modelPath, modelType, True)
 
+global writer
+
 def runLaneDetectionToFile(capture, laneDetector, outputFileName):
     fourcc = cv2.VideoWriter_fourcc(*'MP4V')
     out = cv2.VideoWriter(f'{outputFileName}.mp4', fourcc, 20.0, (1280,720))
-
+    
     while capture.isOpened():
         try:
             ret, frame = capture.read()
@@ -36,5 +39,3 @@ def runLaneDetectionToFile(capture, laneDetector, outputFileName):
             out.write(outputImage)
         else:
             break
-    
-    out.release();

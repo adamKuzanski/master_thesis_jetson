@@ -10,6 +10,7 @@ from enum import Enum
 from scipy.spatial.distance import cdist
 
 from shapely.geometry import LineString
+import csv
 
 
 
@@ -127,12 +128,15 @@ class ModelType(Enum):
 	TUSIMPLE = 0
 	CULANE = 1
 
-global right_lane_polynomial_arr, left_lane_polynomial_arr
 right_lane_polynomial_arr = []
 left_lane_polynomial_arr = []
 center_lane_polynomial_arr = []
+distance_to_right_arr = []
+distance_to_left_arr = []
+delta_left_lane_arr = []
+delta_right_lane_arr = []
 
-def getAverageLanePolynomial(lane_points, lane_type, moving_average = 5):
+def getAverageLanePolynomial(lane_points, lane_type, moving_average = 30):
 	"""
 	lane_points - points correspondig to a particular lane
 	lane_type - integer discribing which lane we are talking about
@@ -241,6 +245,10 @@ class UltrafastLaneDetector():
 
 		# Initialize image transformation
 		self.img_transform = self.initialize_image_transform()
+
+		dataFile = open('trainingCorners.csv', 'w', newline='')
+		writer = csv.writer(dataFile)
+		writer.writerow(["state", "distance_to_left", "distance_to_right", "delta_left_lane", "delta_right_lane"])
 
 	@staticmethod
 	def initialize_model(model_path, cfg, use_gpu):
@@ -422,19 +430,19 @@ class UltrafastLaneDetector():
 			DANGER_ZONE_MARGIN = 100
 
 			midpoints = filter_roi_points(midpoints, ROI_VERTICIES)
-			# Draw the center line
-			for x,y in midpoints:
-				x = int(x)
-				y = int(y)
-				cv2.circle(binary_img, (x, y), 3, (255, 0, 255), 3)
-				cv2.circle(binary_img, (x+ACCEPTED_ZONE_MARGIN, y), 1, (0, 255, 0), 3)
-				cv2.circle(binary_img, (x-ACCEPTED_ZONE_MARGIN, y), 1, (0, 255, 0), 3)
+				# # Draw the center line
+				# for x,y in midpoints:
+				# 	x = int(x)
+				# 	y = int(y)
+				# 	cv2.circle(binary_img, (x, y), 3, (255, 0, 255), 3)
+				# 	cv2.circle(binary_img, (x+ACCEPTED_ZONE_MARGIN, y), 1, (0, 255, 0), 3)
+				# 	cv2.circle(binary_img, (x-ACCEPTED_ZONE_MARGIN, y), 1, (0, 255, 0), 3)
 
-				cv2.circle(binary_img, (x+WARNING_ZONE_MARGIN, y), 1, (0, 255, 255), 3)
-				cv2.circle(binary_img, (x-WARNING_ZONE_MARGIN, y), 1, (0, 255, 255), 3)
+				# 	cv2.circle(binary_img, (x+WARNING_ZONE_MARGIN, y), 1, (0, 255, 255), 3)
+				# 	cv2.circle(binary_img, (x-WARNING_ZONE_MARGIN, y), 1, (0, 255, 255), 3)
 
-				cv2.circle(binary_img, (x+DANGER_ZONE_MARGIN, y), 1, (0, 0, 255), 3)
-				cv2.circle(binary_img, (x-DANGER_ZONE_MARGIN, y), 1, (0, 0, 255), 3)
+				# 	cv2.circle(binary_img, (x+DANGER_ZONE_MARGIN, y), 1, (0, 0, 255), 3)
+				# 	cv2.circle(binary_img, (x-DANGER_ZONE_MARGIN, y), 1, (0, 0, 255), 3)
 
 			# WARNING DEPARTURE LOGIC
 			car_center = (670, 480)
@@ -461,7 +469,6 @@ class UltrafastLaneDetector():
 				state = 2
 			
 			# CALCULATE DISTANCE TO LEFT AND RIGHT LANES
-
 			if(lanes_detected[1] and lanes_detected[2]):
 				lanes_points[1] = filter_roi_points(lanes_points[1], ROI_VERTICIES)
 				lanes_points[2] = filter_roi_points(lanes_points[2], ROI_VERTICIES)
@@ -471,7 +478,11 @@ class UltrafastLaneDetector():
 				x_vals = np.linspace(lanes_points[1][0][0], lanes_points[1][-1][0], num=100)
 				closest_x = x_vals[np.argmin((f(x_vals, *left_poly) - car_center[1])**2)]
 				closest_y = f(closest_x, *left_poly)
-				distance_to_left = np.sqrt((car_center[0] - closest_x)**2 + (car_center[1] - closest_y)**2)
+				distance_to_left_temp = np.sqrt((car_center[0] - closest_x)**2 + (car_center[1] - closest_y)**2)
+				#smoothen
+				distance_to_left_arr.append(distance_to_left_temp)
+				if len(distance_to_left_arr) > 4: distance_to_left_arr.pop(0)
+				distance_to_left = sum(distance_to_left_arr) / len(distance_to_left_arr)
 				# print(distance_to_left)
 
 				#calculate distance to the right lane
@@ -479,27 +490,36 @@ class UltrafastLaneDetector():
 				x_vals = np.linspace(lanes_points[2][0][0], lanes_points[2][-1][0], num=100)
 				closest_x = x_vals[np.argmin((f(x_vals, *right_poly) - car_center[1])**2)]
 				closest_y = f(closest_x, *right_poly)
-				distance_to_right = np.sqrt((car_center[0] - closest_x)**2 + (car_center[1] - closest_y)**2)
+				distance_to_right_temp = np.sqrt((car_center[0] - closest_x)**2 + (car_center[1] - closest_y)**2)
+				#smoothen
+				distance_to_right_arr.append(distance_to_right_temp)
+				if len(distance_to_right_arr) > 4: distance_to_right_arr.pop(0)
+				distance_to_right = sum(distance_to_right_arr) / len(distance_to_right_arr)
 				# print(distance_to_right)
 
+				# calculate rate of change
+				DELTA_MOVING_AVERAGE = 10
+				delta_left_lane = distance_to_left_arr[-1] - distance_to_left_arr[0]
+				delta_left_lane_arr.append(delta_left_lane)
+				if len(delta_left_lane_arr) > DELTA_MOVING_AVERAGE: delta_left_lane_arr.pop(0)
+				delta_left_lane = sum(delta_left_lane_arr) / len(delta_left_lane_arr)
 
-			# the output I want to have is
-			# 	STATE - DONE
-			#	DISTANCE TO CENTER - DONE
-			#	DISTANCE TO LEFT - DONE
-			# 	DISTANCE TO RIGHT - DONE
-			# 	RATE_OF_CHANGE_FROM_CENTER - TODO
-			#	RATE_OF_CHANGE_FROM_LEFT - TODO
-			#	RATE_OF_CHANGE_FROM_RIGHT - TODO
-			#	IS_LANE_CHAGING - TODO ALMOST DONE
+				# SMOOTHEN
+				delta_right_lane = distance_to_right_arr[-1] - distance_to_right_arr[0]
+				delta_right_lane_arr.append(delta_right_lane)
+				if len(delta_right_lane_arr) > DELTA_MOVING_AVERAGE: delta_right_lane_arr.pop(0)
+				delta_right_lane = sum(delta_right_lane_arr) / len(delta_right_lane_arr)
+				# print("L: ", delta_left_lane, "\tR: ", delta_right_lane)
+
+				# open the file in the write mode
+				dataFile = open('trainingCorners.csv', 'a', newline='')
+				# create the csv writer
+				writer = csv.writer(dataFile)
+				writer.writerow([state, distance_to_left, distance_to_right, delta_left_lane, delta_right_lane]) ## add time in state
+				dataFile.close()
 
 
-
-			
-
-
-
-			
+			# ADD TIME IN ZONE COUNTER MAYBE :D
 
 			# ############################## ROI VISUALIZED ################################
 			# # Define the vertices of the trapezoid ROI
