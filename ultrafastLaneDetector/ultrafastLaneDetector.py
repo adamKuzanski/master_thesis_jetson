@@ -12,9 +12,8 @@ from scipy.spatial.distance import cdist
 from shapely.geometry import LineString
 import csv
 
-
-
 from ultrafastLaneDetector.model import parsingNet
+from ultrafastLaneDetector.fuzzyController import LaneDepartureDetector
 
 lane_colors = [(0,0,255),(0,255,0),(255,0,0),(0,255,255)]
 
@@ -41,6 +40,9 @@ ROI_VERTICIES = np.array([[(200, 600),         		# bottom-left corner
 							(500, 400),                	# top-left corner
 							(700, 400),                	# top-right corner
 							(1200, 600)]], dtype=np.int32) # bottom-right corner
+
+# WARNING DEPARTURE LOGIC
+car_center = (650, 480)
 
 def get_x_y_values(point_list):
 	x = [point[0] for point in point_list]
@@ -136,7 +138,16 @@ distance_to_left_arr = []
 delta_left_lane_arr = []
 delta_right_lane_arr = []
 
-def getAverageLanePolynomial(lane_points, lane_type, moving_average = 30):
+lane_cross_classifier = LaneDepartureDetector()
+
+
+goodStateCounter = 0
+warningStateCounter = 0
+dangerStateCounter = 0
+state = "INITIAL"
+
+
+def getAverageLanePolynomial(lane_points, lane_type, moving_average = 20):
 	"""
 	lane_points - points correspondig to a particular lane
 	lane_type - integer discribing which lane we are talking about
@@ -229,6 +240,7 @@ class ModelConfig():
 		self.row_anchor = culane_row_anchor
 		self.griding_num = 200
 		self.cls_num_per_lane = 18
+
 
 
 class UltrafastLaneDetector():
@@ -382,7 +394,7 @@ class UltrafastLaneDetector():
 			lanes_points[2] = filter_roi_points(lanes_points[2], ROI_VERTICIES)
 
 			if(len(lanes_points) == 0 or len(lanes_points[2]) == 0):
-				print("DUPA")
+				print("NO LANES FOUND")
 				return input_img
 			
 			# draw the points
@@ -395,14 +407,14 @@ class UltrafastLaneDetector():
 				left_lane_poly =  getAverageLanePolynomial(lanes_points[1], 0)
 				right_lane_poly = getAverageLanePolynomial(lanes_points[2], 1)
 			except:
-				draw_line_from_poly(lanes_points[1], left_lane_polynomial_arr[-1], binary_img, (0, 0, 255))
-				draw_line_from_poly(lanes_points[2], right_lane_polynomial_arr[-1], binary_img, (0, 255, 0))
+				# draw_line_from_poly(lanes_points[1], left_lane_polynomial_arr[-1], binary_img, (0, 0, 255))
+				# draw_line_from_poly(lanes_points[2], right_lane_polynomial_arr[-1], binary_img, (0, 255, 0))
 				input_img = cv2.addWeighted(input_img, 0.5, binary_img, 0.5, 0)
 				return input_img
 
 			# draw lines
-			draw_line_from_poly(lanes_points[1], left_lane_poly, binary_img, (0, 0, 255))
-			draw_line_from_poly(lanes_points[2], right_lane_poly, binary_img, (0, 255, 0))
+			# draw_line_from_poly(lanes_points[1], left_lane_poly, binary_img, (0, 0, 255))
+			# draw_line_from_poly(lanes_points[2], right_lane_poly, binary_img, (0, 255, 0))
 
 			# # calculate the center of the road lane
 			# center_points = lanes_points[1] + lanes_points[2]
@@ -420,14 +432,13 @@ class UltrafastLaneDetector():
 				right_y = lanes_points[2][i][1]
 				midpoint = [(left_x + right_x) / 2, (left_y + right_y) / 2]
 				midpoints.append(midpoint)
-
 			
 			# DRAW CENTER LINE
 			# calculate the lines
 			
-			ACCEPTED_ZONE_MARGIN = 30
-			WARNING_ZONE_MARGIN = 60
-			DANGER_ZONE_MARGIN = 100
+			# ACCEPTED_ZONE_MARGIN = 30
+			# WARNING_ZONE_MARGIN = 60
+			# DANGER_ZONE_MARGIN = 100
 
 			midpoints = filter_roi_points(midpoints, ROI_VERTICIES)
 				# # Draw the center line
@@ -444,30 +455,26 @@ class UltrafastLaneDetector():
 				# 	cv2.circle(binary_img, (x+DANGER_ZONE_MARGIN, y), 1, (0, 0, 255), 3)
 				# 	cv2.circle(binary_img, (x-DANGER_ZONE_MARGIN, y), 1, (0, 0, 255), 3)
 
-			# WARNING DEPARTURE LOGIC
-			car_center = (670, 480)
-
-			# Define the polynomial function
+			# # Define the polynomial function
 			f = lambda x, a, b, c : a*x**2 + b*x + c
+			# midpoint_x, midpoint_y = get_x_y_values(midpoints)
+			# midpoint_poly = np.polyfit(midpoint_x, midpoint_y, 2)
+			# x_vals = np.linspace(midpoint_x[0], midpoint_x[-1], num=100)
+			# closest_x = x_vals[np.argmin((f(x_vals, *midpoint_poly) - car_center[1])**2)]
+			# closest_y = f(closest_x, *midpoint_poly)
+			# distance_to_center = np.sqrt((car_center[0] - closest_x)**2 + (car_center[1] - closest_y)**2)
 
-			midpoint_x, midpoint_y = get_x_y_values(midpoints)
-			midpoint_poly = np.polyfit(midpoint_x, midpoint_y, 2)
-			x_vals = np.linspace(midpoint_x[0], midpoint_x[-1], num=100)
-			closest_x = x_vals[np.argmin((f(x_vals, *midpoint_poly) - car_center[1])**2)]
-			closest_y = f(closest_x, *midpoint_poly)
-			distance_to_center = np.sqrt((car_center[0] - closest_x)**2 + (car_center[1] - closest_y)**2)
-
-			state = 0
-			if(distance_to_center < ACCEPTED_ZONE_MARGIN):
-				cv2.circle(binary_img, car_center, 5, (0, 255, 0), 3)
-				state = 0
-			elif distance_to_center > ACCEPTED_ZONE_MARGIN and distance_to_center < WARNING_ZONE_MARGIN:
-				cv2.circle(binary_img, car_center, 5, (0, 255, 255), 3)
-				state = 1
-			else:
-				cv2.circle(binary_img, car_center, 5, (0, 0, 255), 3)
-				state = 2
-			
+			# state = 0
+			# if(distance_to_center < ACCEPTED_ZONE_MARGIN):
+			# 	cv2.circle(binary_img, car_center, 5, (0, 255, 0), 3)
+			# 	state = 0
+			# elif distance_to_center > ACCEPTED_ZONE_MARGIN and distance_to_center < WARNING_ZONE_MARGIN:
+			# 	cv2.circle(binary_img, car_center, 5, (0, 255, 255), 3)
+			# 	state = 1
+			# else:
+			# 	cv2.circle(binary_img, car_center, 5, (0, 0, 255), 3)
+			# 	state = 2
+				
 			# CALCULATE DISTANCE TO LEFT AND RIGHT LANES
 			if(lanes_detected[1] and lanes_detected[2]):
 				lanes_points[1] = filter_roi_points(lanes_points[1], ROI_VERTICIES)
@@ -504,19 +511,64 @@ class UltrafastLaneDetector():
 				if len(delta_left_lane_arr) > DELTA_MOVING_AVERAGE: delta_left_lane_arr.pop(0)
 				delta_left_lane = sum(delta_left_lane_arr) / len(delta_left_lane_arr)
 
-				# SMOOTHEN
-				delta_right_lane = distance_to_right_arr[-1] - distance_to_right_arr[0]
-				delta_right_lane_arr.append(delta_right_lane)
-				if len(delta_right_lane_arr) > DELTA_MOVING_AVERAGE: delta_right_lane_arr.pop(0)
-				delta_right_lane = sum(delta_right_lane_arr) / len(delta_right_lane_arr)
-				# print("L: ", delta_left_lane, "\tR: ", delta_right_lane)
+				# # SMOOTHEN
+				# delta_right_lane = distance_to_right_arr[-1] - distance_to_right_arr[0]
+				# delta_right_lane_arr.append(delta_right_lane)
+				# if len(delta_right_lane_arr) > DELTA_MOVING_AVERAGE: delta_right_lane_arr.pop(0)
+				# delta_right_lane = sum(delta_right_lane_arr) / len(delta_right_lane_arr)
+				# # print("L: ", delta_left_lane, "\tR: ", delta_right_lane)
 
-				# open the file in the write mode
-				dataFile = open('trainingCorners.csv', 'a', newline='')
-				# create the csv writer
-				writer = csv.writer(dataFile)
-				writer.writerow([state, distance_to_left, distance_to_right, delta_left_lane, delta_right_lane]) ## add time in state
-				dataFile.close()
+				# # open the file in the write mode
+				# dataFile = open('trainingCorners.csv', 'a', newline='')
+				# # create the csv writer
+				# writer = csv.writer(dataFile)
+				# writer.writerow([state, distance_to_left, distance_to_right, delta_left_lane, delta_right_lane]) ## add time in state
+				# dataFile.close()
+
+				road_position_state = lane_cross_classifier.calculate(distance_to_left, distance_to_right, delta_left_lane)
+				global goodStateCounter, warningStateCounter, state
+
+				if road_position_state < 30:
+					goodStateCounter = goodStateCounter + 1
+					if goodStateCounter > 15:
+						goodStateCounter = 16
+						warningStateCounter = 0
+						state = "GOOD"
+
+				elif road_position_state >= 30 and road_position_state <= 60:
+					warningStateCounter += 1
+
+					if warningStateCounter > 15:
+						goodStateCounter = 10
+						state = "WARNING"
+				else:
+					warningStateCounter += 3
+					if warningStateCounter > 50:
+						state = "DANGER"
+				
+				# print(state)
+				if(state == "INITIAL"):
+					cv2.circle(binary_img, car_center, 5, (0, 0, 0), 4)
+				elif (state == "GOOD"):
+					cv2.circle(binary_img, car_center, 5, (0, 255, 0), 4)
+				elif (state == "WARNING"):
+					cv2.circle(binary_img, car_center, 5, (0, 255, 255), 8)
+				elif (state == "DANGER"):
+					cv2.circle(binary_img, car_center, 5, (0, 0, 255), 15)
+
+
+
+
+				# if(distance_to_center < ACCEPTED_ZONE_MARGIN):
+				# 	cv2.circle(binary_img, car_center, 5, (0, 255, 0), 3)
+				# 	state = 0
+				# elif distance_to_center > ACCEPTED_ZONE_MARGIN and distance_to_center < WARNING_ZONE_MARGIN:
+				# 	cv2.circle(binary_img, car_center, 5, (0, 255, 255), 3)
+				# 	state = 1
+				# else:
+				# 	cv2.circle(binary_img, car_center, 5, (0, 0, 255), 3)
+				# 	state = 2
+
 
 
 			# ADD TIME IN ZONE COUNTER MAYBE :D
@@ -551,6 +603,15 @@ class UltrafastLaneDetector():
 
 			
 			input_img = cv2.addWeighted(input_img, 0.5, binary_img, 0.5, 0)
+
+			# print("right_lane_polynomial_arr: ", len(right_lane_polynomial_arr))
+			# print("left_lane_polynomial_arr: ", len(left_lane_polynomial_arr))
+			# print("center_lane_polynomial_arr: ", len(center_lane_polynomial_arr))
+			# print("distance_to_right_arr: ", len(distance_to_right_arr))
+			# print("distance_to_left_arr: ", len(distance_to_left_arr))
+			# print("delta_left_lane_arr: ", len(delta_left_lane_arr))
+			# print("delta_right_lane_arr: ", len(delta_right_lane_arr))
+
 
 			# left_x = sum([point[0] for point in lanes_points[1]]) / len(lanes_points[1])
 			# left_y = sum([point[1] for point in lanes_points[1]]) / len(lanes_points[1])
